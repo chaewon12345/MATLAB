@@ -475,3 +475,365 @@ NASA의 **SMAP L3 SPL3SMP** 데이터는 기본적으로 육지(land surface)의
 
 5️⃣ 강수량
 <img width="1120" height="1022" alt="image (54)" src="https://github.com/user-attachments/assets/b20a91b1-6954-4237-b1c5-4c94226185e8" />
+
+---
+
+# CFIS 기반 시뮬레이션 정답 데이터 수집
+
+> MATLAB에서 **총 33만 개 격자**에 대해 **CFIS 기반 시뮬레이션을 100회 수행**해 각 셀의 **발화확률 Pignite** 및 **확산확률 Pspread**를 계산하고 **중간 자동 저장과 체크포인트 기능을 포함한 스크립트**
+> 
+> 
+> 를 구현하였습니다.
+> 
+
+### ✅ 전체 시뮬레이션 개요 구조
+
+| 단계 | 설명 |
+| --- | --- |
+| ① 입력 불러오기 | 격자별 기상·지형·식생 등 지표 (`input_data_set.csv`) |
+| ② 발화확률 계산 | 각 셀의 Pignite 계산 |
+| ③ 시뮬레이션 N회 반복 | 각 격자마다 CFIS 모델 기반 확산 진행 |
+| ④ 결과 누적 | 셀별 번짐 횟수 누적 (spread_count) |
+| ⑤ 확산확률 계산 | Pspread=번진횟수/ N |
+| ⑥ 자동 저장 | 1만 개 단위 저장, checkpoint 기능 포함 |
+
+### ✅ 발화확률, 확산 확률 계산 공식
+
+> CFIS에서 **발화확률(Pₐₙᵢₜₑ)** 와 **확산확률(Pₛₚᵣₑₐ𝒹)** 은 확정된 고정 공식이 없습니다.
+> 
+
+→  이에 실제 논문과 시뮬레이션 연구에서 자주 쓰이는 **간단하면서도 대표적인 공식 형태을 채택해 적용했습니다.**
+<aside>
+⚙
+
+1. **발화 확률 Pignite** : 단순화된 sigmoid 회귀식
+
+<img width="1134" height="110" alt="image (55)" src="https://github.com/user-attachments/assets/52834c88-bf1d-44aa-9ff3-25e200eaa608" />
+
+| 변수 | 의미 |
+| --- | --- |
+| NDVI | 식생량 (많을수록 발화↑) |
+| SPEI | 가뭄 정도 (건조할수록 발화↑) |
+| T | 기온 (높을수록 발화↑) |
+| SMAP | 토양 수분 (많을수록 발화↓) |
+| H | 상대 습도 |
+| P | 강수량 |
+
+2. **확산 확률 Pspread** : 방향성 없이 간단히 가중합 형태
+
+<img width="666" height="118" alt="image (56)" src="https://github.com/user-attachments/assets/f54c2b39-8209-4765-a135-7faefc664abd" />
+
+| 변수 | 의미 | 정규화 기준 |
+| --- | --- | --- |
+| 풍속 | 셀의 풍속 (m/s) | Vmax=10 (예시) |
+| 경사도 | 셀의 경사 (%) | Smax=45 (예시) |
+| F | 연료 인자 (0~1 범위로 정규화된 값) | 직접 정규화 필요 |
+| α\alpha | 스케일 조정 상수 (ex. 0.8~1.2) | 전체 확산 강도 조절 |
+</aside>
+---
+
+### ✅ 최종 저장되는 `Pspread`와 `Pignite` 의미
+
+### 🔹 `Pignite` (발화 확률) → 실제 모델 학습에는 사용하지 않음
+
+- **시뮬레이션과 무관하게 처음부터 계산된 정적인 값**
+- 즉, 입력 지표 기반으로 계산된 **각 격자의 발화 확률**
+- `N_SIM = 300` 반복과는 **무관하게 한 번만 계산**되어 저장
+
+### 🔹 `Pspread` (확산 확률)
+
+- 시뮬레이션을 3**00번 반복한 후**, 실제로 **해당 셀이 몇 번 번졌는지에 대한 비율**
+
+---
+
+### ✅ 시뮬레이션 구성 코드 (MATLAB)
+
+<aside>
+🗒️
+
+### 파일 구성 (3개)
+
+1. `cfis_simulation.m`
+    
+    → 저장된 이웃 정보 불러와 CFIS 시뮬레이션 실행
+    
+2. `getNeighbors.m`
+    
+    →중심 위경도 기반 2km 이내 이웃 추출 함수
+    
+3. `generate_neighbors_cache.m`
+    
+    → 육지 격자에 대해 이웃 계산 → 중간 저장 포함
+    
+4. `NDVI_land_only.csv`, `input_data_set.csv`
+    
+    → 입력 데이터
+    
+</aside>
+
+<aside>
+🛠
+
+### 사용 순서
+
+1. `generate_neighbors_cache.m` 실행 → `neighbors_cache_land.mat` 생성됨
+2. `cfis_land_simulation_per_cell_3.m` 실행 → `cfis_land_result_percell_6.csv` 출력됨
+</aside>
+
+---
+## `generate_neighbors_cache.m` - 육지 격자 이웃 계산 및 캐싱
+
+이 스크립트는 한반도 **육지 격자에 대해 인접 격자(이웃)를 계산**하고, 중간 저장 및 체크포인트 기능을 통해 **대규모 처리에서도 안정적으로 재시작이 가능**하도록 구성되어 있습니다. 진행률 바가 포함되어 있어 대규모 실행 시 처리 상황을 실시간으로 확인할 수 있습니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `NDVI_land_only.csv` | 육지로 판단된 격자 ID 목록 (`grid_id`) |
+| `input_data_set.csv` | 전체 격자 정보 (`grid_id`, `center_lat`, `center_lon`) 포함 |
+
+## ⚙️ 실행 흐름
+
+### 1. 육지 격자 필터링
+
+- `NDVI_land_only.csv` 파일에서 육지 격자 ID만 추출
+- `input_data_set.csv`에서 `grid_id` 기준으로 육지 격자만 필터링
+
+### 2. 중간 캐시(체크포인트) 불러오기
+
+- 이전 실행 시 저장된 `neighbors_10000.mat`, `neighbors_20000.mat` 등 중간 블록 파일이 존재할 경우, 해당 블록의 결과를 메모리에 불러오고 이어서 계산을 재개함
+
+### 3. 이웃 계산 시작
+
+- 각 격자에 대해 사용자 정의 함수 `getNeighbors(i, lat, lon)`을 호출하여 이웃 격자 리스트를 생성
+    
+    (일반적으로 거리 기반 또는 인접 위경도 기반 계산)
+    
+
+### 4. 진행률 바 표시
+
+- 40칸의 ASCII 진행 바를 활용하여 현재 진행률(%)과 계산 중인 격자 개수를 실시간으로 출력
+
+### 5. 주기적 저장
+
+- `BLOCK_SIZE = 10000` 단위로 계산이 완료될 때마다 `neighbors_XXXX.mat` 형식으로 중간 결과 저장
+- 저장된 파일에는 `block_neighbors` 리스트가 포함되며, 다음 실행 시 체크포인트로 활용 가능
+
+### 6. 전체 결과 저장
+
+- 전체 계산 완료 후, 전체 이웃 정보(`neighbors`)를 `neighbors_cache_land.mat`에 최종 저장
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `neighbors_10000.mat`, `neighbors_20000.mat`, ... | 각 블록 단위로 계산된 이웃 정보 중간 저장 파일 |
+| `neighbors_cache_land.mat` | 전체 육지 격자에 대한 이웃 정보가 포함된 최종 캐시 파일 |
+
+---
+
+## `getNeighbors.m`
+
+(Haversine 거리 기반 이웃 격자 탐색)
+
+`getNeighbors`  함수는 **특정 격자(`idx`)를 기준으로 반경 2km 이내에 있는 이웃 격자의 인덱스를 반환**합니다. 지구 곡률을 고려한 **Haversine 공식을 사용**하여 위경도 기반 거리 계산을 수행합니다.
+
+## 📥 입력 인자
+
+| 인자명 | 설명 |
+| --- | --- |
+| `idx` | 기준이 되는 격자의 인덱스 (1부터 시작하는 정수) |
+| `center_lat` | 모든 격자의 중심 위도 배열 (벡터) |
+| `center_lon` | 모든 격자의 중심 경도 배열 (벡터) |
+
+## 📤 출력 값
+
+| 이름 | 설명 |
+| --- | --- |
+| `neighbors` | 기준 격자 `idx`로부터 2.0km 이내에 존재하는 **이웃 격자의 인덱스 배열** (자기 자신 제외) |
+
+## 계산 방식
+
+- **Haversine 공식**을 사용해 격자 간 거리 계산 (단위: km)
+- 기준 격자와 모든 다른 격자 간의 거리 계산
+- 거리 `d ≤ 2.0km`인 격자의 인덱스를 `neighbors` 배열에 추가
+
+## 🌐 Haversine 공식 요약
+
+```
+d = 2R * asin( sqrt( sin²(Δφ/2) + cos(φ₁)·cos(φ₂)·sin²(Δλ/2) ) )
+```
+
+| 기호 | 설명 |
+| --- | --- |
+| `R` | 지구 반지름 (6371 km) |
+| `φ` | 위도 (라디안) |
+| `λ` | 경도 (라디안) |
+| `Δφ` | 위도 차 |
+| `Δλ` | 경도 차 |
+
+---
+
+## `cfis_simulation.m` - CFIS 산불 확산 시뮬레이션
+
+**(이웃 캐시 + 진행률 표시 + 중간 저장 포함)**
+
+이 스크립트는 CFIS(Cellular Fire Ignition and Spread) 모델을 기반으로, 한반도 육지 격자에 대해 **산불 발생 및 확산 시뮬레이션을 N회 반복**하고, 격자별 확산 확률(`Pspread`)을 계산하여 저장합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `input_data_set.csv` | 격자별 기상·환경 입력 변수 포함 |
+| `NDVI_land_only.csv` | 육지로 판단된 격자의 ID 목록 (`grid_id`) |
+| `neighbors_cache_land.mat` | 각 육지 격자별 이웃 인덱스 리스트 캐시 파일 |
+
+## ⚙️ 실행 흐름
+
+### 1. 입력 데이터 불러오기
+
+- 전체 격자 중 **육지 격자만 필터링**하여 시뮬레이션 대상 설정
+- 육지 격자의 수(`nGrids`)를 기준으로 시뮬레이션 반복
+
+### 2. 발화 확률(`Pignite`) 계산
+
+- 다양한 기상·지형 변수 기반 로지스틱 회귀 형태로 계산
+- 사용 변수: `NDVI`, `spei_recent_avg`, `temp_C`, `smap_20250630_filled`, `humidity`, `precip_mm`
+
+### 3. 확산 확률(`Pspread`) 계산
+
+- 단순 가중 평균으로 계산
+    
+    `Pspread = α × (0.4 × 풍속정규화 + 0.4 × 경사정규화 + 0.2 × 연료량정규화)`
+    
+
+### 4. 이웃 캐시 불러오기
+
+- `neighbors_cache_land.mat`에서 각 격자별 인접 격자 리스트(`neighbors{i}`) 불러오기
+
+### 5. 시뮬레이션 반복 (N회)
+
+- 격자별 발화 여부 무작위 결정
+- 불이 난 격자에서 이웃 격자에 `Pspread(i)` 확률로 전이
+- `burned` 배열에 확산 여부 저장 → 누적 횟수 `spread_count`에 기록
+
+### 6. 진행률 표시 및 중간 저장
+
+- 매 시뮬레이션마다 ASCII 진행률 바 및 평균 확산률 출력
+- `sim % 10 == 0`일 때 체크포인트 저장(`cfis_land_checkpoint.mat`) 및 중간 결과 CSV 저장(`cfis_land_XXXX.csv`)
+
+### 7. 최종 결과 저장
+
+- 전체 시뮬레이션 종료 후 `cfis_land_result.csv`에 저장
+- 저장 항목:
+    - `grid_id`
+    - `Pignite`: 발화 확률
+    - `BurnedCount`: 불이 붙은 횟수
+    - `SimTotal`: 시뮬레이션 총 횟수
+    - `Pspread`: `BurnedCount / SimTotal` (확산 확률)
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `cfis_land_result.csv` | 전체 육지 격자의 발화 및 확산 확률 결과 |
+| `cfis_land_XXXX.csv` | N시뮬레이션마다 저장되는 중간 결과 (10회 단위) |
+| `cfis_land_checkpoint.mat` | 중간 저장 체크포인트 파일 (강제 종료 대비) |
+
+---
+
+## 정답 데이터 분할 과정
+
+## **`final_data_1.m` - CFIS 시뮬레이션 결과 + 위치 정보 병합**
+
+**(위경도 정보 포함 최종 결과 생성)**
+
+이 스크립트는 CFIS 산불 시뮬레이션 결과(`cfis_land_result_percell_6.csv`)에 **각 격자의 위경도 정보**를 병합하여 최종적으로 공간 기반 분석에 활용 가능한 결과 파일을 생성합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `only_land_grid.csv` | 육지로 간주되는 격자의 `grid_id` 목록 |
+| `cfis_land_result_percell_6.csv` | CFIS 시뮬레이션 결과 (격자별 발화/확산 확률 등 포함) |
+| `input_data_set.csv` | 격자별 지리정보 및 전체 입력 지표 포함 원본 파일 |
+
+## ⚙️ 실행 흐름
+
+### 1. 데이터 불러오기
+
+- 세 개의 주요 데이터 파일(`land`, `cfis`, `input`)을 `readtable`로 불러옵니다.
+
+### 2. 육지 격자 필터링
+
+- CFIS 결과에서 육지로 간주되는 격자(`grid_id`)만 필터링하여 `cfis_land` 생성
+
+### 3. 위치 정보 추출
+
+- `input_data_set.csv`에서 다음 위치 관련 열만 추출:
+    - `lat_min`, `lat_max`, `lon_min`, `lon_max`, `center_lat`, `center_lon`
+
+### 4. 병합 수행
+
+- `grid_id`를 기준으로 `cfis_land`와 위치 정보(`input_coords`)를 병합
+- 병합 방식은 Left Join(`Type = 'left'`)으로, CFIS 결과 기준으로 위치 정보 매핑
+
+### 5. 열 순서 정리
+
+- 최종 결과 파일에서 `grid_id` 바로 다음에 위치 정보 6개 열을 배치
+- 나머지 열은 기존 순서를 유지한 채 뒤에 위치시킴
+
+### 6. 결과 저장
+
+- 병합 및 열 정렬이 완료된 최종 테이블을 `cfis_land_result_percell_6_with_coords.csv`로 저장
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `cfis_land_result_percell_6_with_coords.csv` | CFIS 결과 + 격자 위치 정보가 포함된 최종 분석용 파일 |
+
+---
+
+## **`final_data_2.m` - CFIS 시뮬레이션 데이터 분할**
+
+**(학습/테스트용 7:3 비율로 CSV 저장)**
+
+이 스크립트는 CFIS 기반 산불 확산 결과 데이터(`cfis_land_result_percell_6_with_coords.csv`)를 **머신러닝 학습을 위한 입력으로 사용하기 위해 전처리 및 분할**하는 과정을 수행합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `cfis_land_result_percell_6_with_coords.csv` | 각 격자의 CFIS 시뮬레이션 결과 + 위치 정보 포함된 최종 데이터 |
+
+## ⚙️ 실행 흐름
+
+### 1. 데이터 불러오기
+
+- 전체 CFIS 결과 데이터를 `readtable`로 불러옵니다.
+
+### 2. NaN 처리
+
+- `Pignite` 열에서 NaN 값은 발화 가능성 없음으로 간주하여 **0으로 대체**합니다.
+- `Pspread` 열에 존재하는 NaN의 개수를 출력하여 이상치 여부를 확인합니다.
+
+### 3. 무작위 섞기 (Shuffle)
+
+- 데이터 분할의 편향을 방지하기 위해 **seed 고정 후 랜덤 셔플링**을 수행합니다 (`rng(42)`).
+
+### 4. 7:3 비율로 데이터 분할
+
+- 전체 데이터를 70% 학습용, 30% 테스트용으로 인덱스 기반 분할합니다.
+
+### 5. 결과 저장
+
+- 학습 데이터는 `cfis_train_label.csv`로, 테스트 데이터는 `cfis_test_label.csv`로 저장합니다.
+- 저장된 두 파일은 이후 머신러닝 모델 학습/검증에 사용됩니다.
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `cfis_train_label.csv` | 전체의 70%로 구성된 학습용 데이터 |
+| `cfis_test_label.csv` | 전체의 30%로 구성된 테스트용 데이터 |
