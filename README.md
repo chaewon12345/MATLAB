@@ -123,7 +123,7 @@ SPEI 데이터를 아래 플랫폼에서 수집하였습니다.
 ## ✅ 시각화 그래프
 <img width="1536" height="964" alt="image (48)" src="https://github.com/user-attachments/assets/636604cf-2271-4513-bbf8-614e37585748" />
 
-
+---
 ## 지형 데이터 수집 - Slope Extraction by Grid (평균 경사도 계산)
 
 지형 분석도 (지형 경사도)  데이터를 아래 플랫폼에서 수집하였습니다.
