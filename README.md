@@ -837,3 +837,208 @@ d = 2R * asin( sqrt( sin²(Δφ/2) + cos(φ₁)·cos(φ₂)·sin²(Δλ/2) ) )
 | --- | --- |
 | `cfis_train_label.csv` | 전체의 70%로 구성된 학습용 데이터 |
 | `cfis_test_label.csv` | 전체의 30%로 구성된 테스트용 데이터 |
+
+---
+
+# Random_forest 모델 기반 학습 과정
+
+> 🎯 목표:
+> 
+- 입력: 7가지 지표 +  FARSITE 방향성 데이터(8방향) = 총 21개 피처
+- 출력: `pSpread` (연속값, 회귀 문제)
+- 파일: `farsite_train_label.csv`, `cfis_train_label.csv`
+    
+    
+    | 파일명 | 내용 |
+    | --- | --- |
+    | `farsite_train_label.csv` | 👉 **입력 피처 21개** 포함 (8개 FARSITE 방향 + 13개 지표 추정) |
+    | `cfis_train_label.csv` | 👉 **정답 값 (`pSpread`) 포함** |
+- 진행률 출력
+- 모델 저장
+- 트리 갯수는 일단 300개로 진행하고 성능을 확인해가며 조절하였습니다.
+
+---
+
+## **`model_train.m` - Random Forest 기반 Pspread 예측 모델 학습**
+
+**(21개 입력 지표 기반, 300 트리 구성)**
+
+이 스크립트는 CFIS 시뮬레이션 결과를 정답(label)으로 사용하고, FARSITE 기반의 21개 환경·기상 지표를 입력 피처로 활용하여 **Random Forest 회귀 모델을 학습**합니다. 학습이 완료되면 모델과 `grid_id` 매핑 정보를 함께 저장합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `farsite_train_label.csv` | 격자별 21개 입력 지표 포함 학습용 피처 데이터 |
+| `cfis_train_label.csv` | CFIS 기반 확산 확률(`Pspread`)이 포함된 정답 데이터 |
+
+### 🔹 1. 데이터 불러오기
+
+- 입력 피처(`X_raw`)와 정답 벡터(`Y`)를 각각의 CSV 파일에서 불러옵니다.
+- `cfis_train_label.csv`에 `Pspread` 열이 존재하는지 검증하고 없으면 오류를 발생시킵니다.
+
+### 🔹 2. 입력 피처 구성
+
+- 예측 대상인 `grid_id`, `lat_min`, `lat_max`, `center_lat` 등 **공간 좌표 관련 열은 제거**
+- 최종적으로 **21개 지표만 추출**하여 `X`로 저장
+- 향후 결과 매핑을 위해 `grid_id`는 별도 저장
+
+### 🔹 3. 모델 학습 설정
+
+- **Random Forest 회귀 모델(TreeBagger)** 사용
+- 트리 수는 기본 300개(`nTrees = 300`)
+- **OOB(Out-Of-Bag) 예측과 변수 중요도 측정 기능** 활성화
+- 병렬 연산은 비활성화(`UseParallel = false`)
+
+### 🔹 4. 모델 학습 수행
+
+- `TreeBagger`를 통해 회귀 모델 학습
+- 진행 중 10개 단위로 학습 상황을 출력
+- 학습 시간 측정을 위해 `tic`/`toc` 사용
+
+### 🔹 5. 모델 저장
+
+- 학습 완료 후 타임스탬프 기반의 고유 이름으로 `.mat` 파일로 저장
+- 모델(`Mdl`)과 함께 `grid_ids`도 저장하여 추후 결과 매핑에 활용 가능
+
+## 💾 출력 파일
+
+| 파일명 예시 | 설명 |
+| --- | --- |
+| `random_forest_pspread_model_300trees_YYYYMMDD_HHMMSS.mat` | 학습된 모델과 grid_id 정보가 저장된 결과 파일 |
+
+---
+
+## **`moder_test_1.m` - CFIS Pspread 예측 모델 성능 평가 및 시각화**
+
+**(Random Forest 기반 모델 결과 확인 및 중요 변수 분석)**
+
+이 스크립트는 학습된 **Random Forest 회귀 모델**을 불러와 테스트 데이터를 예측한 후, 예측 결과를 **지도에 시각화**하고, **RMSE/MAE 등의 정량적 지표**, 그리고 **변수 중요도(Feature Importance)** 분석을 수행합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `random_forest_pspread_model_*.mat` | 학습 완료된 Random Forest 모델 (`Mdl`)과 grid_id 저장된 `.mat` 파일 |
+| `farsite_test_label.csv` | 테스트용 입력 피처 (21개 지표 + 위치 정보 포함) |
+| `cfis_test_label.csv` | 테스트용 정답 확산 확률(`Pspread`) 벡터 |
+
+## ⚙️ 실행 흐름
+
+### 1. 모델 및 테스트 데이터 불러오기
+
+- `.mat` 파일로 저장된 모델(`Mdl`)을 로드
+- 테스트 데이터의 `grid_id`, 중심 위경도(`center_lat`, `center_lon`) 저장
+- 학습 제외 대상(`grid_id`, 위치 정보 등)을 제거하고 **21개 입력 피처만 추출**
+
+### 2. 예측 및 성능 평가
+
+- `predict()` 함수로 예측 수행 → `Y_pred`
+- 정답(`Y_true`)과 비교하여 성능 지표 계산:
+    - **RMSE (Root Mean Squared Error)**
+    - **MAE (Mean Absolute Error)**
+
+### 📍모델 성능 평가 결과
+
+```matlab
+[RESULT] RMSE: 0.0947
+[RESULT] MAE : 0.0225
+```
+### ▶️ 이 수치가 의미하는 바
+
+| 지표 | 값 | 해석 |
+| --- | --- | --- |
+| **RMSE** | 0.0947 | 평균적으로 약 **±0.095** 정도 예측 오차가 발생 |
+| **MAE** | 0.0225 | 평균 절대 오차는 약 **2.25%** 수준의 오차를 가짐 |
+- `pSpread` 값이 **[0, 1] 범위의 확률 값**이라는 걸 감안하면, **오차 0.0225는 2% 수준의 예측 오차**
+- **RMSE 0.095는 모델이 꽤 안정적으로 예측하고 있다는 뜻입니다.**
+
+### 🔹 2.  지도 위 시각화 (예측 vs 정답)
+📊 모델 예측 결과값 시각화
+<img width="1532" height="1014" alt="image (57)" src="https://github.com/user-attachments/assets/eeef00d0-fa69-4476-a08f-ac2d858c6b8e" />
+📊 정답 결과값 시각화
+<img width="1534" height="990" alt="image (58)" src="https://github.com/user-attachments/assets/c9ba794a-58bc-466e-b500-0e8601bd8d1b" />
+
+### 🔹 3.  OOB Error 그래프 출력
+> 오차가 빠르게 줄고 수렴하면 모델이 잘 학습된 것을 의미합니다.
+>
+> <img width="1610" height="1022" alt="image (59)" src="https://github.com/user-attachments/assets/c50db0f5-4db3-4acb-8ea0-83fc2d064d73" />
+
+### ▶️ OOB Error 그래프 해석
+
+<aside>
+
+### 🔍 그래프 특징
+
+- **초반 0~50개 트리 사이에 급격한 감소**
+    
+    → 모델이 빠르게 학습하면서 예측력을 키우고 있다는 뜻입니다.
+    
+- **이후 100개 트리 이후에는 거의 평평하게 수렴**
+    
+    → 성능이 안정화되고 더 많은 트리를 추가해도 성능 향상이 미미합니다.
+    
+
+---
+
+### ✅ 결론
+
+> 트리 수 300개는 충분히 안정적인 상태이고  트리 수를 더 늘려도 오차 감소 효과는 거의 없기 때문에 300개는 적절한 설정 갯수였습니다.
+> 
+</aside>
+
+---
+학습시킨 Random Forest 기반 Pspread 예측 모델의 성능이 위의 평가처럼 안정적이기 때문에 학습 모델을 통한 격자별 산불 전이 예측 결과 출력 코드를 최종적으로 구현하였습니다.
+
+## **`model_result.m` - Pspread 예측 결과 생성**
+
+**(위경도 포함 예측 CSV 생성용)**
+
+이 스크립트는 학습된 **Random Forest 모델을 불러와** 테스트 데이터에 대해 **산불 확산 확률(Pspread)을 예측**하고, 각 격자의 위치 정보와 함께 **결과 테이블을 구성 및 저장**합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `farsite_test_label.csv` | 테스트용 입력 피처 및 격자 위치 정보 포함 |
+| `cfis_test_label.csv` *(선택)* | 실제 `Pspread` 값 (성능 평가용 비교 가능) |
+| `random_forest_pspread_model_*.mat` | 학습된 Random Forest 모델(`Mdl`)과 `grid_id` 포함된 `.mat` 파일 |
+
+## ⚙️ 실행 흐름
+
+### 1. 테스트 데이터 불러오기
+
+- 격자의 `grid_id`, 위경도(`lat_min`, `lat_max`, `lon_min`, `lon_max`, `center_lat`, `center_lon`) 정보를 포함한 전체 데이터 로드
+- 예측에 사용할 **21개 입력 피처만 추출**하여 `X_test`로 구성
+
+### 2. 모델 로드
+
+- 저장된 `.mat` 파일에서 학습된 모델(`Mdl`)을 불러옵니다
+    
+    *(이미 메모리에 있다면 생략 가능)*
+    
+
+### 3. 예측 수행
+
+- `predict(Mdl, X_test)`로 `pSpread_pred` 예측 수행
+
+### 4. 결과 테이블 구성
+
+- 다음 항목을 포함한 테이블을 생성:
+    - `grid_id`, `lat_min`, `lat_max`, `lon_min`, `lon_max`
+    - `center_lat`, `center_lon`
+    - `pSpread_pred` (예측 확산 확률)
+
+### 5. 결과 저장
+
+- 타임스탬프(`yyyymmdd_HHMMSS`)를 포함한 파일명으로 CSV 저장
+    
+    예: `predicted_pspread_with_coords_20250729_152010.csv`
+    
+
+### ✅ 요약: 예측 결과 예시 테이블
+
+| grid_id | lat_min | lat_max | lon_min | lon_max | center_lat | center_lon | pSpread_pred |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 12345 | 37.1 | 37.2 | 127.3 | 127.4 | 37.15 | 127.35 | 0.783 |
+| ... | ... | ... | ... | ... | ... | ... | … |
