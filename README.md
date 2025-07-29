@@ -507,7 +507,7 @@ NASA의 **SMAP L3 SPL3SMP** 데이터는 기본적으로 육지(land surface)의
 
 ## ⚙ 실행 방식
 
-```bash
+```
 python ndvi_grid_avg.py
 ```
 
@@ -551,10 +551,89 @@ python ndvi_grid_avg.py
 
 설치 방법:
 
-```bash
+```
 pip install pandas numpy rasterio
 ```
+## ✅ 시각화 그래프
+<img width="766" height="690" alt="image" src="https://github.com/user-attachments/assets/41ee22b3-45aa-4a09-9d4a-fa4528c1576f" />
 
+---
+# 연료 수분 지수 데이터
+
+본 스크립트는 `GEOS-5` 기반 NetCDF 파일로부터 **연료 수분 지수(FFMC, DMC, DC)**를 추출하여, `korea_grids_0.01deg.csv` 내의 각 격자 중심 좌표에 대해 최근접 위경도 값을 기반으로 지표값을 할당하고, 그 결과를 CSV 파일로 저장하는 데 목적이 있습니다.
+
+---
+
+## 🧾 입력 데이터
+
+1. **격자 정의 CSV 파일 (`korea_grids_0.01deg.csv`)**
+    - 각 행은 하나의 격자 셀을 의미
+    - 필수 열: `grid_id`, `center_lat`, `center_lon`, `lat_min`, `lat_max`, `lon_min`, `lon_max`
+2. **연료 수분 NetCDF 파일 (`FWI.GEOS-5.Daily.Default.YYYYMMDD00.YYYYMMDD.nc`)**
+    - 기상청 제공 GEOS-5 기반 FWI 제품
+    - 변수:
+        - `GEOS-5_FFMC`: Fine Fuel Moisture Code
+        - `GEOS-5_DMC`: Duff Moisture Code
+        - `GEOS-5_DC`: Drought Code
+    - 좌표 변수:
+        - `lat`: 위도 배열
+        - `lon`: 경도 배열
+
+---
+
+## ⚙ 실행 방식
+
+```
+python fuel_moisture_extraction.py
+```
+
+---
+
+## 🔍 주요 처리 과정
+
+1. **CSV 및 NetCDF 파일 로드**
+    - `pandas`와 `xarray`를 사용해 입력 데이터를 불러옵니다.
+2. **각 격자의 중심 위경도에 대해 최근접 GEOS-5 격자 인덱스 찾기**
+    - `np.argmin(np.abs(...))` 방식으로 격자 좌표와 가장 가까운 NetCDF 포인트를 찾습니다.
+3. **해당 지점의 FFMC, DMC, DC 값을 추출**
+    - `NaN` 여부 확인 후 반올림
+4. **최종 결과를 `fuel_moisture_nearest.csv`로 저장**
+    - 각 행은 격자별 결과 (FFMC, DMC, DC)
+
+---
+
+## 💾 출력 결과
+
+**`fuel_moisture_nearest.csv`**
+
+- 열 구성:
+    - `grid_id`, `min_lat`, `max_lat`, `min_lon`, `max_lon`, `FFMC`, `DMC`, `DC`
+- 값 예시:
+    
+    ```
+    grid_id,min_lat,max_lat,min_lon,max_lon,FFMC,DMC,DC
+    10001,36.94,36.95,128.44,128.45,89.21,52.76,342.10
+    ```
+    
+
+---
+
+## 🛠 필요 패키지
+
+- `pandas`
+- `numpy`
+- `xarray`
+- `netCDF4` (간접적으로 필요할 수 있음)
+
+설치:
+
+```
+pip install pandas numpy xarray netCDF4
+```
+## ✅ 시각화 그래프
+<img width="1415" height="902" alt="image" src="https://github.com/user-attachments/assets/61d2a02b-866b-42d7-b1c5-4273107f3238" />
+
+---
 
 # CFIS 기반 시뮬레이션 정답 데이터 수집
 
