@@ -7,6 +7,7 @@ SPEI 데이터를 아래 플랫폼에서 수집하였습니다.
 
 📁 사용하는 데이터가 **1km 격자 기반으로 한반도 지역 분석**이고, 목적이 **단기/중기 가뭄 모니터링 또는 위험 예측**이기에 **`SPEI-06`** 로  결정하였고 `.nc` 형태의 파일을 로컬에 다운로드하였습니다.
 <img width="1564" height="1534" alt="image (47)" src="https://github.com/user-attachments/assets/aaf25e13-a00c-4b2a-82e4-3b7eaf6edd41" />
+
 ---
 
 ## **`SPEI_data.m` - SPEI 최근 6개월 평균 계산**
