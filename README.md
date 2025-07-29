@@ -5,6 +5,68 @@
 아래는 총 21개 지표에 대한 기상, 환경 정보의 데이터 수집 및 전처리 과정 및 구현 코드와 모델 학습 과정을 자세히 다룬다.
 
 ---
+# 한반도 격자화
+이 스크립트는 대한민국 전역(위도 33.0° ~ 38.5°, 경도 124.5° ~ 130.5°)을 기준으로 **0.01도 간격의 격자 셀**로 나누고, 각 격자에 대해 위도·경도 범위 및 중심점을 계산하여 CSV 파일로 저장합니다.
+
+이 격자 파일은 **NDVI, FFMC, DMC, 기상 데이터 등 다양한 공간 데이터를 격자 단위로 정렬**할 때 활용됩니다.
+
+---
+
+## 🧾 출력 데이터
+
+### `korea_grids_0.01deg.csv`
+
+- 총 약 330,000개의 격자 셀 포함
+- 열 설명:
+
+| 컬럼명 | 설명 |
+| --- | --- |
+| grid_id | 격자 고유 ID (0부터 시작하는 번호) |
+| lat_min | 격자의 최소 위도 |
+| lat_max | 격자의 최대 위도 |
+| lon_min | 격자의 최소 경도 |
+| lon_max | 격자의 최대 경도 |
+| center_lat | 격자 중심 위도 |
+| center_lon | 격자 중심 경도 |
+
+---
+
+## ⚙ 실행 방식
+
+```
+python generate_korea_grids.py
+```
+
+또는 Jupyter Notebook에서 셀 단위로 실행 가능합니다.
+
+---
+
+## 🧠 처리 로직 요약
+
+1. 대한민국 범위 설정:
+    - 위도: 33.0° ~ 38.5°
+    - 경도: 124.5° ~ 130.5°
+2. 해상도 설정:
+    - `res = 0.01` (약 1.1km 해상도)
+3. 2중 루프를 통해 위도·경도 블록 생성:
+    - 각 셀의 위/경도 범위 계산
+    - 중심점 계산
+    - 고유 ID 부여
+4. 모든 격자 정보를 리스트로 저장 후 `pandas` DataFrame으로 변환
+5. 최종 CSV로 저장
+
+---
+
+## 🛠 필요 패키지
+
+- `pandas`
+
+설치:
+
+```
+pip install pandas
+```
+
 
 # SPEI 데이터 수집
 
@@ -1433,3 +1495,271 @@ d = 2R * asin( sqrt( sin²(Δφ/2) + cos(φ₁)·cos(φ₂)·sin²(Δλ/2) ) )
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 12345 | 37.1 | 37.2 | 127.3 | 127.4 | 37.15 | 127.35 | 0.783 |
 | ... | ... | ... | ... | ... | ... | ... | … |
+
+---
+
+# GradientBoostingRegressor 모델 기반 학습 과정
+
+## **`model_train.m` -GradientBoostingRegressor 기반 Pspread 예측 모델 학습**
+본 MATLAB 스크립트는 `train_label.csv` 학습 데이터를 기반으로, **Gradient Boosting Regression (LSBoost)** 모델을 학습하여 **산불 확산 확률(`Pspread`)을 예측하는 회귀 모델**을 생성합니다.
+
+학습된 모델은 `.mat` 파일로 저장되어, 후속 예측 또는 평가에 활용됩니다.
+
+---
+
+## 🧾 입력 데이터
+
+### 📁 `train_label.csv`
+
+격자 단위의 산불 예측 학습 데이터로, 다음 열(columns)을 포함해야 합니다:
+
+| 컬럼명 | 설명 |
+| --- | --- |
+| avg_fuelload_pertree_kg | 평균 나무당 연료량 (kg) |
+| FFMC, DMC, DC | 연료 수분 지수 (Fine/Duff/Drought) |
+| NDVI | 식생 지수 |
+| smap_20250630_filled | 토양 수분 보간값 |
+| temp_C, humidity | 기온 및 습도 |
+| wind_speed, wind_deg | 풍속 및 풍향 |
+| precip_mm | 강수량 |
+| mean_slope | 평균 경사도 |
+| spei_recent_avg | 최근 가뭄 지수 (SPEI) |
+| P_NW ~ P_SE | 8방향 확산 확률 (FARSITE 기반) |
+| Pspread | 타겟값, 셀별 확산 확률 (0~1) |
+
+---
+
+## ⚙ 실행 흐름
+
+### 🔹 1. 데이터 전처리
+
+- FARSITE 확산 확률 8방향(P_NW~P_SE)의 평균값을 `farsite_prob`으로 계산하여 입력 피처에 추가
+
+```matlab
+farsite_cols = {'P_NW','P_N','P_NE','P_W','P_E','P_SW','P_S','P_SE'};
+train.farsite_prob = mean(train{:, farsite_cols}, 2);
+```
+
+### 🔹 2. 입력(X), 출력(y) 정의
+
+- `X`: 14개 피처
+- `y`: `Pspread`
+
+### 🔹 3. 모델 정의 및 학습
+
+```matlab
+tree = templateTree('MaxNumSplits', 10);
+model = fitrensemble(X, y, ...
+    'Method', 'LSBoost', ...
+    'NumLearningCycles', 300, ...
+    'LearnRate', 0.1, ...
+    'Learners', tree);
+```
+
+- Boosting 방식: **LSBoost (Least Squares)**
+- 트리 수: `300`
+- 학습률: `0.1`
+- 트리 최대 분할 수: `10`
+
+### 🔹 4. 모델 저장
+
+- 학습 완료된 모델은 `gradient_boosting_pspread_model_300trees_yyyymmdd_HHMMSS.mat` 형식으로 저장됩니다.
+
+---
+
+## 💾 출력 파일
+
+| 파일명 예시 | 설명 |
+| --- | --- |
+| `gradient_boosting_pspread_model_300trees_20250729_142205.mat` | 학습된 `RegressionEnsemble` 객체가 저장된 MATLAB `.mat` 파일 |
+
+```matlab
+save(model_filename, 'model');
+```
+
+---
+
+## 🛠 필요 환경
+
+- MATLAB R2021a 이상 권장
+- `Statistics and Machine Learning Toolbox` 필수
+
+---
+## **`model_predict.m -GradientBoostingRegressor 기반 모델 예측**
+
+본 스크립트는 사전 학습된 Gradient Boosting 모델을 활용해, `test_label.csv`에 포함된 격자별 입력 데이터에 대해 **산불 확산 확률(pSpread)**을 예측하고, 결과를 CSV로 저장합니다.
+
+---
+
+## 🧾 입력 데이터
+
+### 📁 `test_label.csv`
+
+테스트 대상 격자 셀들의 데이터로, 다음 열이 포함되어 있어야 합니다:
+
+| 컬럼명 | 설명 |
+| --- | --- |
+| grid_id | 격자 고유 ID |
+| lat_min, lat_max | 격자 위도 범위 |
+| lon_min, lon_max | 격자 경도 범위 |
+| center_lat, center_lon | 격자 중심점 위/경도 |
+| avg_fuelload_pertree_kg | 평균 나무당 연료량 (kg) |
+| FFMC, DMC, DC | 연료 수분 지수 |
+| NDVI | 식생 지수 |
+| smap_20250630_filled | 보간된 토양 수분 |
+| temp_C, humidity | 기온, 습도 |
+| wind_speed, wind_deg | 풍속, 풍향 |
+| precip_mm | 강수량 |
+| mean_slope | 평균 경사도 |
+| spei_recent_avg | 최근 가뭄 지수 |
+| P_NW ~ P_SE | FARSITE 확산 확률 8방향 |
+
+---
+
+## ⚙ 실행 흐름
+
+### 🔹 1. 테스트 데이터 로딩 및 전처리
+
+- `FARSITE`의 8방향 확산 확률 평균을 `farsite_prob`으로 계산하여 입력 피처에 추가
+
+### 🔹 2. 입력 피처 구성
+
+- 학습 시와 동일한 14개 피처 추출:
+    
+    ```matlab
+    X = test{:, {
+        'avg_fuelload_pertree_kg', ...
+        'FFMC', 'DMC', 'DC', ...
+        'NDVI', 'smap_20250630_filled', ...
+        'temp_C', 'humidity', ...
+        'wind_speed', 'wind_deg', ...
+        'precip_mm', 'mean_slope', 'spei_recent_avg', ...
+        'farsite_prob'
+    }};
+    ```
+    
+
+### 🔹 3. 사전 학습된 모델 불러오기
+
+- `.mat` 파일에서 `model` 객체를 불러옴
+- 예시 파일명: `gradient_boosting_pspread_model_300trees_20250706_131211.mat`
+
+### 🔹 4. 예측 수행
+
+- `predict(model, X)`를 통해 각 격자에 대한 `pSpread` 확산 확률 예측
+
+### 🔹 5. 결과 테이블 구성
+
+- 격자 기본 정보 + 예측 확산 확률(`pSpread_pred`)을 포함한 결과 테이블 생성
+
+### 🔹 6. 결과 저장
+
+- 파일명 예시: `gbr_predicted_pspread_20250729_150201.csv`
+
+---
+
+## 💾 출력 파일
+
+| 파일명 예시 | 설명 |
+| --- | --- |
+| `gbr_predicted_pspread_20250729_150201.csv` | 격자별 예측 확산 확률 결과 테이블 |
+
+출력 열 구성:
+
+- `grid_id`, `lat_min`, `lat_max`, `lon_min`, `lon_max`, `center_lat`, `center_lon`, `pSpread_pred`
+
+---
+
+## 🛠 필요 환경
+
+- MATLAB R2021a 이상
+- `Statistics and Machine Learning Toolbox`
+- 학습된 `.mat` 모델 파일 (예: `gradient_boosting_pspread_mode`
+
+---
+## **`model_evaluate.m -GradientBoostingRegressor 기반 모델 성능 평가 **
+
+본 스크립트는 학습된 Gradient Boosting 모델의 **예측 정확도**를 평가하고, 시각화 및 중요도 분석을 수행합니다.
+
+평가 지표로는 RMSE 및 MAE를 사용하며, 예측 결과와 CFIS 기반 정답을 비교합니다.
+
+---
+
+## 🧾 입력 파일
+
+### 1. 예측 결과 CSV (`evaluation_result_*.csv`)
+
+- 예측 수행 후 저장된 결과
+- 필수 열:
+    - `grid_id`, `center_lat`, `center_lon`, `pSpread_pred`
+
+### 2. 정답 데이터 CSV (`cfis_test_label.csv`)
+
+- CFIS 기반 Ground Truth 확산 확률
+- 필수 열: `Pspread`
+
+### 3. 학습된 모델 (`gradient_boosting_pspread_model_*.mat`)
+
+- `fitrensemble`으로 학습된 RegressionEnsemble 객체 포함
+
+---
+
+## ⚙ 실행 흐름
+
+### 🔹 1. 데이터 불러오기
+
+- 예측 결과(`pSpread_pred`)와 실제 정답(`Pspread`)을 병합
+
+### 🔹 2. 성능 지표 계산
+
+- **RMSE (Root Mean Squared Error)**
+- **MAE (Mean Absolute Error)**
+
+### 🔹 3. 결과 테이블 구성 및 저장
+
+- 열 추가: `Pspread_true`, `abs_error`
+- 결과 저장: `evaluation_result_yyyymmdd_HHMMSS.csv`
+
+### 🔹 4. 시각화 (지도 기반)
+
+- 예측 확산 확률 지도
+- 실제 확산 확률 지도
+- 절대 오차 지도
+
+### 🔹 5. 피처 중요도 분석
+
+- `predictorImportance(model)` 사용
+- 상위 3개 중요 피처 출력 및 바 차트 시각화
+
+### 🔹 6. 학습 트리 수에 따른 Resubstitution Loss 시각화
+
+- `resubLoss(model, 'Learners', 1:t)`로 학습 곡선 생성
+
+---
+
+## 💾 출력 파일
+
+| 파일명 예시 | 설명 |
+| --- | --- |
+| `evaluation_result_20250729_151001.csv` | 예측값, 정답값, 오차가 포함된 평가 결과 CSV |
+
+---
+
+## 📊 주요 시각화 출력
+
+| 시각화 이름 | 설명 |
+| --- | --- |
+| 🔥 예측 확산 확률 지도 | `pSpread_pred` 시각화 (`jet` 컬러맵, caxis [0 1]) |
+| 📍 실제 확산 확률 지도 | `Pspread_true` 시각화 |
+| 🧭 예측 오차 지도 | `abs_error` 시각화 (`parula` 컬러맵) |
+| 📊 피처 중요도 바 차트 | Gradient Boosting 기준 변수 영향도 |
+| 📉 트리 수에 따른 학습 오차 그래프 | 모델 수에 따른 loss 변화 시각화 |
+
+---
+
+## 🛠 필요 환경
+
+- MATLAB R2021a 이상
+- `Statistics and Machine Learning Toolbox`
+- 사전 학습된 `.mat` 모델 파일 필요
+- 
