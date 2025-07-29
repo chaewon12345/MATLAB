@@ -380,3 +380,98 @@ NASA의 **SMAP L3 SPL3SMP** 데이터는 기본적으로 육지(land surface)의
 ### ✅ 시각화 그래프
 <img width="1610" height="986" alt="image (49)" src="https://github.com/user-attachments/assets/1a59b581-c1ab-40c2-8724-de14e035d582" />
 
+---
+
+# 기상 데이터
+
+기상 데이터는 아래 플랫폼에서 수집하였습니다.
+[ERA5 hourly data on single levels from 1940 to present](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview)
+
+📁 위의 링크에서2025년 6월 26일 하루치의 시간대별(0:00 ~ 24:00) 기상 지표 5개를 NetCDF 데이터 파일로 수동 다운로드하였습니다.
+
+---
+
+## **`weather_data_3.py` - ERA5 기반 기상 변수 격자 추출**
+
+**(2025년 6월 30일 기준)**
+
+이 스크립트는 ECMWF ERA5 재분석 데이터를 활용하여, **한반도 0.01도 격자 중심 좌표 기준으로 주요 기상 요소(기온, 습도, 바람, 강수량)**를 추출하여 저장합니다. 각 격자마다 가장 가까운 ERA5 지점의 값을 선택하며, 하루치 데이터를 평균 또는 누적 방식으로 계산합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `korea_grids_0.01deg.csv` | 격자 중심 좌표 및 grid_id 포함한 기준 격자 정보 |
+| `data_stream-oper_stepType-instant.nc` | ERA5 순간값 데이터 (기온, 이슬점, 바람 등) |
+| `data_stream-oper_stepType-accum.nc` | ERA5 누적값 데이터 (강수량) |
+
+## ⚙️ 실행 흐름
+
+### 1. 격자 정보 불러오기
+
+- 기준 격자 CSV에서 각 셀의 중심 위도(`center_lat`) 및 경도(`center_lon`)와 `grid_id`를 읽어옵니다.
+
+### 2. ERA5 NetCDF 파일 불러오기
+
+- `instant.nc` 파일에서 기온(`t2m`), 이슬점(`d2m`), 10m 바람(`u10`, `v10`)을 불러옵니다.
+- `accum.nc` 파일에서 누적 강수량(`tp`)을 불러옵니다.
+- 단위 변환:
+    - 기온: K → °C
+    - 강수량: m → mm
+
+### 3. 파생 변수 계산
+
+- 풍속(`wind_speed`)과 풍향(`wind_deg`)을 계산합니다.
+- 기온과 이슬점 온도를 활용해 상대습도(`rh`)를 계산합니다 (Tetens 공식 기반).
+
+### 4. 시간 평균 및 누적
+
+- 하루치 데이터를 시간 축(`valid_time`) 기준으로 평균(`mean`) 또는 합계(`sum`)로 집계합니다.
+    - 예: 기온, 풍속, 습도 → 평균값
+    - 강수량 → 누적값
+
+### 5. 최근접 좌표 추출
+
+- 각 격자 중심 좌표에 대해 ERA5 데이터의 최근접 격자값을 추출합니다.
+- 변수별로 `extract_nearest()` 함수로 최근접 `latitude`, `longitude`의 값을 가져옵니다.
+
+### 6. 결과 저장
+
+- 각 격자에 대해 추출된 기상 요소를 하나의 테이블로 정리합니다.
+- `weather_by_grid_20250630.csv` 파일로 저장합니다.
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `weather_by_grid_20250630.csv` | 각 `grid_id`에 대해 추출된 5개 기상 변수 포함 (`temp_C`, `humidity`, `wind_speed`, `wind_deg`, `precip_mm`) |
+
+---
+
+## **`weather_data_3.m` - ERA5 기상 변수 시각화**
+
+이 스크립트는 `weather_by_grid_20250624.csv`의 ERA5 기반 기상 요소를 **한반도 육지 격자 중심 좌표**에 매핑하여 지도 위에 시각화합니다. 5가지 변수(기온, 상대습도, 풍속, 풍향, 강수량)에 대해 **색상 점 시각화(scatter map)**를 제공합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `korea_grids_0.01deg.csv` | 격자 중심 좌표 및 grid_id 포함 기준 격자 정보 |
+| `weather_by_grid_20250624.csv` | 각 격자의 ERA5 기반 기상 변수 (기온, 습도, 바람, 강수량 등) |
+
+### ✅ 시각화 그래프
+
+1️⃣ 기온
+<img width="1118" height="1040" alt="image (50)" src="https://github.com/user-attachments/assets/825910ac-59ea-4270-9268-0d4aba19df25" />
+
+2️⃣ 습도
+<img width="1096" height="1042" alt="image (51)" src="https://github.com/user-attachments/assets/f1be206a-9745-4dd8-9bd8-4acc07224a36" />
+
+3️⃣ 풍속
+<img width="1072" height="1022" alt="image (52)" src="https://github.com/user-attachments/assets/7a32d2b2-aaf7-471b-a33b-e1dbca651ad3" />
+
+4️⃣ 풍향
+<img width="1116" height="1038" alt="image (53)" src="https://github.com/user-attachments/assets/2a8f7da2-602f-4921-a072-e4990cfdca32" />
+
+5️⃣ 강수량
+<img width="1120" height="1022" alt="image (54)" src="https://github.com/user-attachments/assets/b20a91b1-6954-4237-b1c5-4c94226185e8" />
