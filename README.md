@@ -484,6 +484,77 @@ NASA의 **SMAP L3 SPL3SMP** 데이터는 기본적으로 육지(land surface)의
 <img width="1120" height="1022" alt="image (54)" src="https://github.com/user-attachments/assets/e110fd82-4ea3-4cc7-8b97-7d4958d5ed3f" />
 
 ---
+# NDVI 데이터  
+
+본 스크립트는 250m 해상도의 NDVI GeoTIFF 이미지(`NDVI_LATEST_250m_fixed.tif`)를 기반으로, `korea_grids_0.01deg.csv` 파일에 정의된 각 격자 영역 내의 **유효 NDVI 픽셀값 평균**을 계산하여 저장합니다.
+
+---
+
+## 🧾 입력 데이터
+
+### 1. 격자 정의 파일 (`korea_grids_0.01deg.csv`)
+
+- 각 행은 하나의 격자 정보를 포함
+- 필수 열:
+    - `grid_id`, `lat_min`, `lat_max`, `lon_min`, `lon_max`
+
+### 2. NDVI GeoTIFF 이미지 (`NDVI_LATEST_250m_fixed.tif`)
+
+- 250m 해상도의 NDVI 이미지
+- NDVI 값은 일반적으로 -1.0 ~ 1.0 범위이나, 이 스크립트는 **0보다 큰 값만 유효**로 간주
+
+---
+
+## ⚙ 실행 방식
+
+```bash
+python ndvi_grid_avg.py
+```
+
+(위 코드를 `.py` 파일로 저장한 경우)
+
+---
+
+## 🔍 주요 처리 과정
+
+1. `pandas`를 이용해 격자 정보 CSV를 읽어옴
+2. `rasterio`를 통해 NDVI GeoTIFF 이미지 열기
+3. 각 격자 셀에 대해:
+    - 격자 영역의 위도/경도 좌표를 픽셀 인덱스로 변환
+    - 해당 영역에서 NDVI 값을 추출
+    - NDVI 값 중 0보다 큰 값만 유효값으로 간주하여 평균 계산
+4. 결과를 `NDVI_processed_average.csv` 파일로 저장
+
+---
+
+## 💾 출력 데이터
+
+### `NDVI_processed_average.csv`
+
+- 기존 격자 정의 정보에 `NDVI` 평균 열이 추가됨
+- 예시:
+    
+    ```
+    grid_id,lat_min,lat_max,lon_min,lon_max,NDVI
+    10001,36.94,36.95,128.44,128.45,0.4821
+    10002,36.95,36.96,128.44,128.45,0.3712
+    ...
+    ```
+  
+---
+
+## 🛠 필요 패키지
+
+- `pandas`
+- `numpy`
+- `rasterio`
+
+설치 방법:
+
+```bash
+pip install pandas numpy rasterio
+```
+
 
 # CFIS 기반 시뮬레이션 정답 데이터 수집
 
