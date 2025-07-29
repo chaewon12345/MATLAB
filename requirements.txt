@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-pandas
-requests
-aiohttp
-numpy
-httpx
-google-cloud-firestore
-
