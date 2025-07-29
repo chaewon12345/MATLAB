@@ -153,5 +153,5 @@
 | `korea_grids_with_slope.csv` | 기준 격자 정보 + 평균 경사도(`mean_slope`)가 포함된 병합 파일 |
 
 ### ✅ 시각화 그래프
+<img width="1068" height="1026" alt="image (46)" src="https://github.com/user-attachments/assets/1f6afc2f-5e19-411b-8a20-5e45ce96a58b" />
 
-![image (46).png](attachment:185af873-cecc-4f1d-b4ec-4e17e0440e0e:image_(46).png)
