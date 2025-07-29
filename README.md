@@ -279,3 +279,104 @@ SPEI 데이터를 아래 플랫폼에서 수집하였습니다.
 ### ✅ 시각화 그래프
 <img width="1068" height="1026" alt="image (46)" src="https://github.com/user-attachments/assets/1f6afc2f-5e19-411b-8a20-5e45ce96a58b" />
 
+---
+## SMAP 데이터
+
+SMAP 데이터는 아래 플랫폼에서 수집했습니다. 
+[Earthdata Login](https://urs.earthdata.nasa.gov/oauth/authorize?client_id=_JLuwMHxb2xX6NwYTb4dRA&response_type=code&redirect_uri=https%3A%2F%2Fn5eil01u.ecs.nsidc.org%2FOPS%2Fredirect&state=aHR0cHM6Ly9uNWVpbDAxdS5lY3MubnNpZGMub3JnL1NNQVAvU1BMM1NNUC4wMDkvMjAyNS4wNi4zMC8)
+
+📁 해당 플랫폼에서 **전체 SMAP .h5 파일을 직접 다운로드하고 해당 파일에서 한반도 영역만 MATLAB에서 부분 추출**하였습니다.
+
+NASA의 **SMAP L3 SPL3SMP** 데이터는 기본적으로 육지(land surface)의 토양 수분만 포함하고 **해양(바다) 영역은 `NaN` (결측값)** 으로 표시하기 때문에 지형  데이터 수집 과정에서 진행했던 것처럼 spei 데이터의 특성(데이터가 육지에서만 적용)을 활용해  육지 격자만 수집하였습니다.
+
+다만 SMAP 데이터 일부에 아래와 같은 문제가 있었습니다.
+<aside>
+👩🏼
+
+**원인**
+
+1. **위성 수신 품질 문제**
+    - 강수, 눈, 구름, RFI, 지형 등으로 품질 저하 시 NaN 발생
+    - `retrieval_qual_flag`가 나쁠 경우 NaN
+    - 해안 근처 픽셀도 품질 불안정
+2. **SMAP 픽셀 중심과 격자 중심 거리 문제**
+    - SMAP 해상도는 약 36km
+    - 1km 격자 중 일부는 가까운 SMAP 픽셀이 없어 매핑 실패
+
+---
+
+**✅ 최종 처리 방식**
+
+- **SPEI 값 기준**으로 바다/육지 격자 구분
+- **육지 격자만 SMAP 수분값 수집**
+- **NaN인 육지 격자**는 **보간(interpolation)** 적용
+</aside>
+
+---
+
+## **`SMAP_data_4.m` - SMAP 토양 수분 격자 매핑 및 보간**
+
+이 스크립트는 **SMAP  데이터(HDF5 포맷)**를 한반도 0.01도 격자에 매핑하여, **육지 격자에 수분값을 할당하고, 결측값에 대해 최근접 보간**을 수행한 후 최종 파일로 저장하는 작업을 수행합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `korea_grids_0.01deg.csv` | 전체 한반도 격자 정보 (`grid_id`, 위·경도 경계 포함) |
+| `korea_spei06_recent_avg_all.csv` | 육지 여부 판단을 위한 SPEI 평균값 (`NaN` 여부로 육지 판단) |
+| `SMAP_L3_SM_P_20250630_R19240_001.h5` | SMAP 토양 수분 데이터 (.h5 형식) |
+
+## ⚙️ 실행 흐름
+
+### 1. 데이터 불러오기
+
+- 전체 격자 정보(`grid_id`, `lat_min`, `lat_max`, `lon_min`, `lon_max`)와 육지 여부 판단용 SPEI 데이터를 불러옵니다.
+- 육지 격자만 추출하기 위해 SPEI 값이 `NaN`이 아닌 격자를 필터링합니다.
+- SMAP HDF5 파일에서 위도, 경도, 수분값 데이터를 불러옵니다.
+
+### 2. SMAP 한반도 영역 필터링
+
+- 위도 33~~39도, 경도 124~~132도 범위로 한반도 영역만 선택합니다.
+- 선택된 영역의 위·경도 및 수분값(`soil_moisture`)을 별도로 저장합니다.
+
+### 3. SMAP 수분값 격자 매핑
+
+- 각 육지 격자 중심 좌표에 대해 가장 가까운 SMAP 포인트를 찾아 수분값을 할당합니다.
+- 이때 유클리드 거리 제곱을 기준으로 최근접 점을 선택합니다.
+
+### 4. 최근접 보간기 생성
+
+- 수분값이 없는 육지 격자에 대해서는 **`scatteredInterpolant` 객체**를 사용하여 최근접 보간법으로 대체값을 생성할 준비를 합니다.
+- 보간 대상은 육지 격자 중심 좌표 기준으로 설정합니다.
+
+### 5. 전체 격자에 최종 수분값 생성
+
+- 전체 격자(육지 + 바다)에 대해:
+    - 육지인 경우: 수분값이 있으면 그대로 사용, 없으면 보간값 사용
+    - 바다인 경우: `NaN` 유지
+
+### 6. 결과 저장
+
+- 최종 수분값(`smap_20250630_filled`)을 `grids` 테이블에 추가한 뒤, `smap_20250630_all_grids_with_interpolated_land.csv`로 저장합니다.
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `smap_20250630_all_grids_with_interpolated_land.csv` | 전체 격자에 대해 보간 포함 최종 SMAP 수분값 추가된 결과 파일 (`smap_20250630_filled`) |
+
+---
+
+## **`SMAP_data_5.m` - SMAP 토양 수분 시각화**
+
+이 스크립트는 `smap_20250630_all_grids_with_interpolated_land.csv` 파일을 사용하여, **육지 격자의 수분값을 한반도 지도 위에 색상 점 형태로 시각화**합니다. 보간 포함 수분값(`smap_20250630_filled`)을 바탕으로, 지리적 공간 해석을 위한 시각적 자료를 생성합니다.
+
+## 📁 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `smap_20250630_all_grids_with_interpolated_land.csv` | 전체 격자에 대해 보간 포함 SMAP 수분값이 포함된 결과 파일 (`center_lat`, `center_lon`, `smap_20250630_filled`) |
+
+### ✅ 시각화 그래프
+<img width="1610" height="986" alt="image (49)" src="https://github.com/user-attachments/assets/1a59b581-c1ab-40c2-8724-de14e035d582" />
+
