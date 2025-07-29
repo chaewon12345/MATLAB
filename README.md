@@ -634,7 +634,299 @@ pip install pandas numpy xarray netCDF4
 <img width="1415" height="902" alt="image" src="https://github.com/user-attachments/assets/61d2a02b-866b-42d7-b1c5-4273107f3238" />
 
 ---
+# 격자 기반 FARSITE 전이 확률 계산 스크립트 (Farsite_cal.m)
 
+본 스크립트는 각 격자 셀을 중심으로 8방향(NW, N, NE, W, E, SW, S, SE)에 대해 **풍향과 경사 방향을 고려한 전이 확률**을 계산하여 `.csv` 파일로 저장합니다.
+
+이는 FARSITE 확산 모델을 간소화한 확률 기반 시뮬레이션 입력값 생성에 사용됩니다.
+
+---
+
+## 🧾 입력 파일
+
+### 📁 `input_data_land_only.csv`
+
+격자 중심점과 연료 데이터를 포함한 입력 테이블
+
+| 컬럼명 | 설명 |
+| --- | --- |
+| `grid_id` | 격자 ID |
+| `center_lat`, `center_lon` | 격자 중심 위/경도 |
+| `avg_fuelload_pertree_kg` | 평균 나무당 연료량 (ROS 계산용) |
+| `wind_deg` | 풍향 (도, 0~360°) |
+
+※ `slope_dir`은 코드 내에서 전역 설정됨 (`135도`로 고정)
+
+---
+
+## ⚙ 실행 흐름
+
+### 1️⃣ 입력 데이터 불러오기
+
+- `readtable`로 육지 격자 데이터(`input_data_land_only.csv`) 불러오기
+
+### 2️⃣ 격자 전이 방향 설정
+
+- 총 8개 방향: NW, N, NE, W, E, SW, S, SE
+- 각 방향의 벡터(`dx`, `dy`) 및 방위각(`theta_ij`) 계산
+
+### 3️⃣ 전이 확률 계산
+
+각 방향에 대해 다음을 계산:
+
+```
+P(d) = exp(-d_ij^2 / sigma^2) * (1 + G) * ros;
+G = α * cos(θ_ij - wind_dir) + β * cos(θ_ij - slope_dir)
+
+```
+
+- `d_ij`: 거리 (유클리드 거리, 1 또는 √2)
+- `ros`: Rate of Spread (연료량 기반, 예시 계산식 사용)
+- `G`: 바람 및 경사 방향의 영향
+- `alpha`, `beta`: 영향 가중치 (기본 0.5)
+- 최종 `P`는 정규화하여 8방향 확률 합이 1이 되도록 함
+
+### 4️⃣ 결과 저장
+
+- 출력 파일: `farsite_transfer_probs.csv`
+- 열 구성: `grid_id`, `center_lat`, `center_lon`, `P_NW`, ..., `P_SE`
+
+---
+
+## 💾 출력 파일
+
+### `farsite_transfer_probs.csv`
+
+| 컬럼명 | 설명 |
+| --- | --- |
+| grid_id | 격자 ID |
+| center_lat | 중심 위도 |
+| center_lon | 중심 경도 |
+| P_NW ~ P_SE | 8방향 전이 확률 (합계: 1.0) |
+
+---
+
+## 🛠 파라미터 설정
+
+| 변수 | 설명 | 기본값 |
+| --- | --- | --- |
+| `sigma` | 거리 기반 확산 감소 인자 | `1.0` |
+| `alpha` | 풍향 영향 가중치 | `0.5` |
+| `beta` | 경사 방향 영향 가중치 | `0.5` |
+| `slope_dir` | 고정 경사 방향 (도 단위) | `135` |
+
+--- 
+# Farsite 전이 확률 계산 
+본 스크립트는 FARSITE 방식으로 계산된 8방향 확산 확률(P_NW ~ P_SE)을 대상으로, 방향별 평균값에 기반한 자동 가중치 보정을 수행하고 정규화된 확산 확률을 재계산하여 저장합니다.
+
+이는 특정 방향으로의 전이 확률이 과도하거나 불균형할 경우, 전체 분포를 통계적으로 재조정하기 위한 보조적 후처리 단계입니다.
+
+## 🧾 입력 파일
+📁 input_data_farsite_Nan.csv
+격자별 원시 FARSITE 확산 확률을 포함하는 CSV
+
+필수 열:
+
+grid_id, center_lat, center_lon
+
+P_NW, P_N, P_NE, P_W, P_E, P_SW, P_S, P_SE
+
+## ⚙ 처리 흐름
+### 1. 방향별 평균 확산 확률 계산
+mean_probs(d) = mean(P_d, 'omitnan');
+NaN 값을 제외하고 전체 방향 평균을 계산
+
+### 2. 역비율 기반 가중치 계산
+matlab
+복사
+편집
+inv_weights = 1 ./ mean_probs;
+평균 확률이 작을수록 가중치를 더 크게 부여 (덜 확산되는 방향 보정 목적)
+
+### 3. 정규화
+```
+inv_weights = inv_weights / max(inv_weights);
+```
+가장 큰 가중치를 1로 맞춤 (상대적 스케일 유지)
+
+### 4. 확산 확률 보정 및 정규화
+각 셀에 대해 8방향 확산 확률에 inv_weights를 곱하고 NaN 제외 후 정규화
+
+### 5. 결과 저장
+```
+writetable(corrected, 'corrected_farsite_probs.csv');
+```
+정규화된 확률 테이블을 저장
+
+## 💾 출력 파일
+파일명	설명
+corrected_farsite_probs.csv	보정된 8방향 확산 확률 테이블 (합계 = 1)
+
+###출력 열:
+```
+grid_id, center_lat, center_lon, P_NW, ..., P_SE
+```
+## 📢 자동 계산된 가중치 출력 예시
+###📌 자동 계산된 방향별 가중치:
+```
+  P_NW: 1.000
+  P_N : 0.912
+  P_NE: 0.865
+  ...
+```
+이 값은 이후 확산 시뮬레이션에서 방향 편향 조정 근거로 활용 가능
+
+## 🛠 필요 환경
+MATLAB (R2019b 이상 권장)
+
+input_data_farsite_Nan.csv가 사전에 계산되어 있어야 함
+---
+
+# FARSITE 전이 확률 보정 및 정규화 
+
+본 스크립트는 `FARSITE` 방식으로 계산된 8방향 확산 확률(`P_NW` ~ `P_SE`)을 대상으로, **방향별 평균값에 기반한 자동 가중치 보정**을 수행하고 **정규화된 확산 확률**을 재계산하여 저장합니다.
+
+이는 특정 방향으로의 전이 확률이 과도하거나 불균형할 경우, **전체 분포를 통계적으로 재조정**하기 위한 보조적 후처리 단계입니다.
+
+---
+
+## 🧾 입력 파일
+
+### 📁 `input_data_farsite_Nan.csv`
+
+- 격자별 원시 FARSITE 확산 확률을 포함하는 CSV
+- 필수 열:
+    - `grid_id`, `center_lat`, `center_lon`
+    - `P_NW`, `P_N`, `P_NE`, `P_W`, `P_E`, `P_SW`, `P_S`, `P_SE`
+
+---
+
+## ⚙ 처리 흐름
+
+### 1. 방향별 평균 확산 확률 계산
+
+```
+mean_probs(d) = mean(P_d, 'omitnan');
+
+```
+
+- NaN 값을 제외하고 전체 방향 평균을 계산
+
+### 2. 역비율 기반 가중치 계산
+
+```
+inv_weights = 1 ./ mean_probs;
+
+```
+
+- 평균 확률이 작을수록 가중치를 더 크게 부여 (덜 확산되는 방향 보정 목적)
+
+### 3. 정규화
+
+```
+inv_weights = inv_weights / max(inv_weights);
+
+```
+
+- 가장 큰 가중치를 1로 맞춤 (상대적 스케일 유지)
+
+### 4. 확산 확률 보정 및 정규화
+
+- 각 셀에 대해 8방향 확산 확률에 `inv_weights`를 곱하고 `NaN` 제외 후 정규화
+
+### 5. 결과 저장
+
+```
+writetable(corrected, 'corrected_farsite_probs.csv');
+
+```
+
+- 정규화된 확률 테이블을 저장
+
+---
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `corrected_farsite_probs.csv` | 보정된 8방향 확산 확률 테이블 (합계 = 1) |
+
+출력 열:
+
+- `grid_id`, `center_lat`, `center_lon`, `P_NW`, ..., `P_SE`
+
+---
+
+## 📢 자동 계산된 가중치 출력 예시
+
+```
+📌 자동 계산된 방향별 가중치:
+  P_NW: 1.000
+  P_N : 0.912
+  P_NE: 0.865
+  ...
+
+```
+
+- 이 값은 이후 확산 시뮬레이션에서 **방향 편향 조정 근거**로 활용 가능
+
+---
+
+## 🛠 필요 환경
+
+- MATLAB (R2019b 이상 권장)
+- `input_data_farsite_Nan.csv`가 사전에 계산되어 있어야 함
+
+---
+# 데이터 분할 test/ train
+
+본 스크립트는 전체 격자 입력 데이터(`Mapped_Land_Grid_Data.csv`)에서, `grid_id` 기준으로 학습/테스트 세트를 나누어 FARSITE 기반 모델 학습에 사용할 수 있도록 정리합니다.
+
+---
+
+## 🧾 입력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `Mapped_Land_Grid_Data.csv` | 전체 입력 피처 데이터셋 (지형, 기상, NDVI 등 포함) |
+| `cfis_train_label.csv` | 학습에 사용될 격자의 `grid_id` 목록 |
+| `cfis_test_label.csv` | 테스트에 사용될 격자의 `grid_id` 목록 |
+
+---
+
+## ⚙ 실행 흐름
+
+### 🔹 1. 전체 데이터 불러오기
+
+- 입력 피처 데이터 전체 (`Mapped_Land_Grid_Data.csv`) 불러오기
+
+### 🔹 2. 학습/테스트 `grid_id` 목록 불러오기
+
+- CFIS 라벨 파일로부터 학습/테스트용 `grid_id` 추출
+
+### 🔹 3. 순서 유지하며 인덱싱
+
+- `ismember`를 이용해 `grid_id` 기준으로 행 번호(`index`)를 추출
+- `cfis_*_label.csv`에 있는 순서 그대로 정렬됨
+
+### 🔹 4. 유효하지 않은 ID 제거
+
+- 해당 `grid_id`가 `input_data`에 없을 경우 제외
+
+### 🔹 5. 추출 후 저장
+
+- `farsite_train_label.csv` 및 `farsite_test_label.csv`로 각각 저장
+
+---
+
+## 💾 출력 파일
+
+| 파일명 | 설명 |
+| --- | --- |
+| `farsite_train_label.csv` | 학습에 사용할 입력 피처 데이터 |
+| `farsite_test_label.csv` | 테스트에 사용할 입력 피처 데이터 |
+
+각 파일은 `Mapped_Land_Grid_Data.csv`와 동일한 열 구조를 갖고, 필터링된 격자 정보만 포함합니다.
 # CFIS 기반 시뮬레이션 정답 데이터 수집
 
 > MATLAB에서 **총 33만 개 격자**에 대해 **CFIS 기반 시뮬레이션을 100회 수행**해 각 셀의 **발화확률 Pignite** 및 **확산확률 Pspread**를 계산하고 **중간 자동 저장과 체크포인트 기능을 포함한 스크립트**를 구현하였습니다.
