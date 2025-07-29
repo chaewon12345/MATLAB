@@ -1762,4 +1762,18 @@ save(model_filename, 'model');
 - MATLAB R2021a 이상
 - `Statistics and Machine Learning Toolbox`
 - 사전 학습된 `.mat` 모델 파일 필요
-- 
+
+---
+## 📍모델 성능 평가 결과
+
+📊 모델 예측 결과값 시각화
+<img width="1424" height="938" alt="image" src="https://github.com/user-attachments/assets/8452853c-cdd2-46d5-9fa8-cdcb0a1eddb1" />
+
+
+📊 정답 결과값 시각화
+<img width="1376" height="908" alt="image" src="https://github.com/user-attachments/assets/5122bc01-1ce8-4275-9503-bc8ea3d48672" />
+
+📊 Resubstitution Loss 그래프
+
+<img width="1454" height="924" alt="스크린샷 2025-07-27 145511" src="https://github.com/user-attachments/assets/f824e735-4c38-4c06-bf36-1903b491b236" />
+
