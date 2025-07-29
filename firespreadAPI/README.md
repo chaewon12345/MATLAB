@@ -24,9 +24,6 @@ firespreadAPI/
 ├── requirements.txt # Python 패키지 목록
 └── README.md # 이 문서
 
-yaml
-복사
-편집
 
 ---
 
