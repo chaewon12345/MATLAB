@@ -1304,7 +1304,7 @@ d = 2R * asin( sqrt( sin²(Δφ/2) + cos(φ₁)·cos(φ₂)·sin²(Δλ/2) ) )
 
 ---
 
-## **`model_train.m` - Random Forest 기반 Pspread 예측 모델 학습**
+## **`model_train_Randomforest.m` - Random Forest 기반 Pspread 예측 모델 학습**
 
 **(21개 입력 지표 기반, 300 트리 구성)**
 
